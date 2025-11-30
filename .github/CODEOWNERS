@@ -1,0 +1,30 @@
+# Code Owners - OrderApp+
+
+# Global owners (fallback for everything)
+* @Admiralphp
+
+# Documentation
+/docs/ @Admiralphp
+*.md @Admiralphp
+
+# Infrastructure & DevOps
+/infrastructure/ @Admiralphp
+/.github/ @Admiralphp
+/monitoring/ @Admiralphp
+docker-compose*.yml @Admiralphp
+Dockerfile @Admiralphp
+
+# Microservices
+/services/user-service/ @Admiralphp
+/services/product-service/ @Admiralphp
+/services/order-service/ @Admiralphp
+/services/payment-service/ @Admiralphp
+/services/notification-service/ @Admiralphp
+
+# Security & Configuration
+.env.example @Admiralphp
+*/src/config/ @Admiralphp
+*/src/middleware/auth.js @Admiralphp
+
+# CI/CD Pipeline
+/.github/workflows/ @Admiralphp

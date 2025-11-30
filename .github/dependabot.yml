@@ -1,0 +1,166 @@
+version: 2
+updates:
+  # GitHub Actions
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # User Service
+  - package-ecosystem: "npm"
+    directory: "/services/user-service"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "user-service"
+    versioning-strategy: increase
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Product Service
+  - package-ecosystem: "npm"
+    directory: "/services/product-service"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "product-service"
+    versioning-strategy: increase
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Order Service
+  - package-ecosystem: "npm"
+    directory: "/services/order-service"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "order-service"
+    versioning-strategy: increase
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Payment Service
+  - package-ecosystem: "npm"
+    directory: "/services/payment-service"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "payment-service"
+    versioning-strategy: increase
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Notification Service
+  - package-ecosystem: "npm"
+    directory: "/services/notification-service"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+    open-pull-requests-limit: 10
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "notification-service"
+    versioning-strategy: increase
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # Docker base images
+  - package-ecosystem: "docker"
+    directory: "/services/user-service"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "docker"
+
+  - package-ecosystem: "docker"
+    directory: "/services/product-service"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "docker"
+
+  - package-ecosystem: "docker"
+    directory: "/services/order-service"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "docker"
+
+  - package-ecosystem: "docker"
+    directory: "/services/payment-service"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "docker"
+
+  - package-ecosystem: "docker"
+    directory: "/services/notification-service"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "09:00"
+    reviewers:
+      - "Admiralphp"
+    labels:
+      - "dependencies"
+      - "docker"
