@@ -157,7 +157,7 @@ jobs:
           output: 'trivy-results-${{ matrix.service }}.sarif'
 
       - name: Upload Trivy Results to GitHub Security
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-results-${{ matrix.service }}.sarif'
           category: 'trivy-${{ matrix.service }}'
@@ -226,7 +226,7 @@ jobs:
           output: 'trivy-image-results-${{ matrix.service }}.sarif'
 
       - name: Upload Image Scan Results
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-image-results-${{ matrix.service }}.sarif'
           category: 'trivy-image-${{ matrix.service }}'
