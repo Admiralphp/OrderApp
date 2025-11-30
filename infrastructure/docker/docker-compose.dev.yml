@@ -1,0 +1,43 @@
+# Development-specific overrides
+version: '3.8'
+
+services:
+  user-service:
+    volumes:
+      - ../../services/user-service/src:/app/src
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+    command: npm run dev
+
+  product-service:
+    volumes:
+      - ../../services/product-service/src:/app/src
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+    command: npm run dev
+
+  order-service:
+    volumes:
+      - ../../services/order-service/src:/app/src
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+    command: npm run dev
+
+  payment-service:
+    volumes:
+      - ../../services/payment-service/src:/app/src
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+    command: npm run dev
+
+  notification-service:
+    volumes:
+      - ../../services/notification-service/src:/app/src
+    environment:
+      NODE_ENV: development
+      LOG_LEVEL: debug
+    command: npm run dev

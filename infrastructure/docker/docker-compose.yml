@@ -1,0 +1,384 @@
+version: '3.8'
+
+services:
+  # ========================================
+  # Databases
+  # ========================================
+  
+  postgres-product:
+    image: postgres:15-alpine
+    container_name: orderapp-postgres-product
+    environment:
+      POSTGRES_DB: product_db
+      POSTGRES_USER: product_user
+      POSTGRES_PASSWORD: product_pass
+    volumes:
+      - postgres-product-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U product_user -d product_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - orderapp-network
+
+  postgres-order:
+    image: postgres:15-alpine
+    container_name: orderapp-postgres-order
+    environment:
+      POSTGRES_DB: order_db
+      POSTGRES_USER: order_user
+      POSTGRES_PASSWORD: order_pass
+    volumes:
+      - postgres-order-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U order_user -d order_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - orderapp-network
+
+  mongodb-user:
+    image: mongo:6.0
+    container_name: orderapp-mongodb-user
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: user_admin
+      MONGO_INITDB_ROOT_PASSWORD: user_pass
+      MONGO_INITDB_DATABASE: user_db
+    volumes:
+      - mongodb-user-data:/data/db
+    ports:
+      - "27017:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - orderapp-network
+
+  mongodb-payment:
+    image: mongo:6.0
+    container_name: orderapp-mongodb-payment
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: payment_admin
+      MONGO_INITDB_ROOT_PASSWORD: payment_pass
+      MONGO_INITDB_DATABASE: payment_db
+    volumes:
+      - mongodb-payment-data:/data/db
+    ports:
+      - "27018:27017"
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - orderapp-network
+
+  redis-notification:
+    image: redis:7-alpine
+    container_name: orderapp-redis-notification
+    command: redis-server --requirepass notification_pass
+    volumes:
+      - redis-notification-data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - orderapp-network
+
+  # ========================================
+  # Microservices
+  # ========================================
+
+  user-service:
+    build:
+      context: ../../services/user-service
+      dockerfile: Dockerfile
+    container_name: orderapp-user-service
+    environment:
+      NODE_ENV: development
+      PORT: 3001
+      MONGODB_URI: mongodb://user_admin:user_pass@mongodb-user:27017/user_db?authSource=admin
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      JWT_EXPIRY: 24h
+      BCRYPT_ROUNDS: 10
+      LOG_LEVEL: debug
+    ports:
+      - "3001:3001"
+    depends_on:
+      mongodb-user:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - orderapp-network
+
+  product-service:
+    build:
+      context: ../../services/product-service
+      dockerfile: Dockerfile
+    container_name: orderapp-product-service
+    environment:
+      NODE_ENV: development
+      PORT: 3002
+      DB_HOST: postgres-product
+      DB_PORT: 5432
+      DB_NAME: product_db
+      DB_USER: product_user
+      DB_PASSWORD: product_pass
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      LOG_LEVEL: debug
+    ports:
+      - "3002:3002"
+    depends_on:
+      postgres-product:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - orderapp-network
+
+  order-service:
+    build:
+      context: ../../services/order-service
+      dockerfile: Dockerfile
+    container_name: orderapp-order-service
+    environment:
+      NODE_ENV: development
+      PORT: 3003
+      DB_HOST: postgres-order
+      DB_PORT: 5432
+      DB_NAME: order_db
+      DB_USER: order_user
+      DB_PASSWORD: order_pass
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      PRODUCT_SERVICE_URL: http://product-service:3002
+      PAYMENT_SERVICE_URL: http://payment-service:3004
+      NOTIFICATION_SERVICE_URL: http://notification-service:3005
+      LOG_LEVEL: debug
+    ports:
+      - "3003:3003"
+    depends_on:
+      postgres-order:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - orderapp-network
+
+  payment-service:
+    build:
+      context: ../../services/payment-service
+      dockerfile: Dockerfile
+    container_name: orderapp-payment-service
+    environment:
+      NODE_ENV: development
+      PORT: 3004
+      MONGODB_URI: mongodb://payment_admin:payment_pass@mongodb-payment:27017/payment_db?authSource=admin
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      STRIPE_SECRET_KEY: sk_test_your_stripe_secret_key
+      PAYPAL_CLIENT_ID: your_paypal_client_id
+      PAYPAL_CLIENT_SECRET: your_paypal_client_secret
+      PAYPAL_MODE: sandbox
+      ORDER_SERVICE_URL: http://order-service:3003
+      NOTIFICATION_SERVICE_URL: http://notification-service:3005
+      LOG_LEVEL: debug
+    ports:
+      - "3004:3004"
+    depends_on:
+      mongodb-payment:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - orderapp-network
+
+  notification-service:
+    build:
+      context: ../../services/notification-service
+      dockerfile: Dockerfile
+    container_name: orderapp-notification-service
+    environment:
+      NODE_ENV: development
+      PORT: 3005
+      REDIS_HOST: redis-notification
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: notification_pass
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: 587
+      SMTP_SECURE: false
+      SMTP_USER: your-email@gmail.com
+      SMTP_PASSWORD: your-app-password
+      EMAIL_FROM: noreply@orderapp.com
+      LOG_LEVEL: debug
+    ports:
+      - "3005:3005"
+    depends_on:
+      redis-notification:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3005/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - orderapp-network
+
+  # ========================================
+  # Monitoring & Observability
+  # ========================================
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: orderapp-prometheus
+    volumes:
+      - ../monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+      - ../monitoring/prometheus/alerts.yml:/etc/prometheus/alerts.yml
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-lifecycle'
+    ports:
+      - "9090:9090"
+    networks:
+      - orderapp-network
+    restart: unless-stopped
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: orderapp-grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: false
+    volumes:
+      - ../monitoring/grafana/datasources:/etc/grafana/provisioning/datasources
+      - ../monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards
+      - grafana-data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - orderapp-network
+    restart: unless-stopped
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: orderapp-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+    networks:
+      - orderapp-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:8.11.0
+    container_name: orderapp-logstash
+    volumes:
+      - ../monitoring/logstash/logstash.conf:/usr/share/logstash/pipeline/logstash.conf
+    ports:
+      - "5000:5000/tcp"
+      - "5000:5000/udp"
+      - "9600:9600"
+    environment:
+      LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - orderapp-network
+    restart: unless-stopped
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: orderapp-kibana
+    environment:
+      ELASTICSEARCH_HOSTS: http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    networks:
+      - orderapp-network
+    restart: unless-stopped
+
+# ========================================
+# Networks
+# ========================================
+networks:
+  orderapp-network:
+    driver: bridge
+    name: orderapp-network
+
+# ========================================
+# Volumes
+# ========================================
+volumes:
+  postgres-product-data:
+    name: orderapp-postgres-product-data
+  postgres-order-data:
+    name: orderapp-postgres-order-data
+  mongodb-user-data:
+    name: orderapp-mongodb-user-data
+  mongodb-payment-data:
+    name: orderapp-mongodb-payment-data
+  redis-notification-data:
+    name: orderapp-redis-notification-data
+  prometheus-data:
+    name: orderapp-prometheus-data
+  grafana-data:
+    name: orderapp-grafana-data
+  elasticsearch-data:
+    name: orderapp-elasticsearch-data

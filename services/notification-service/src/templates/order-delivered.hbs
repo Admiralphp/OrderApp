@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #4CAF50; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; background: #f9f9f9; }
+    .order-details { background: white; padding: 15px; margin: 20px 0; }
+    .footer { text-align: center; padding: 20px; color: #666; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>🎉 Your Order Has Been Delivered!</h1>
+    </div>
+    
+    <div class="content">
+      <p>Hello {{customerName}},</p>
+      <p>Your order has been successfully delivered!</p>
+      
+      <div class="order-details">
+        <h2>Order Details</h2>
+        <p><strong>Order Number:</strong> {{orderNumber}}</p>
+        <p><strong>Delivered Date:</strong> {{deliveredAt}}</p>
+      </div>
+
+      <p>We hope you enjoy your purchase! If you have any issues with your order, please don't hesitate to contact us.</p>
+
+      <p>We'd love to hear about your experience. Please consider leaving a review!</p>
+    </div>
+
+    <div class="footer">
+      <p>&copy; 2024 OrderApp+. All rights reserved.</p>
+      <p>If you have questions, contact us at support@orderapp.com</p>
+    </div>
+  </div>
+</body>
+</html>

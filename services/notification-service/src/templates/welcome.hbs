@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+    .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+    .header { background: #2196F3; color: white; padding: 20px; text-align: center; }
+    .content { padding: 20px; background: #f9f9f9; }
+    .welcome-box { background: white; padding: 15px; margin: 20px 0; }
+    .features { margin: 20px 0; }
+    .feature { padding: 10px; margin: 10px 0; }
+    .cta { text-align: center; margin: 20px 0; }
+    .button { display: inline-block; padding: 10px 20px; background: #2196F3; color: white; text-decoration: none; border-radius: 5px; }
+    .footer { text-align: center; padding: 20px; color: #666; font-size: 0.9em; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>Welcome to OrderApp+!</h1>
+    </div>
+    
+    <div class="content">
+      <p>Hello {{firstName}},</p>
+      <p>Welcome to OrderApp+! We're thrilled to have you on board.</p>
+      
+      <div class="welcome-box">
+        <h2>Your Account</h2>
+        <p><strong>Email:</strong> {{email}}</p>
+        <p><strong>Member Since:</strong> {{registrationDate}}</p>
+      </div>
+
+      <div class="features">
+        <h3>What You Can Do:</h3>
+        <div class="feature">
+          <p><strong>🛍️ Shop</strong> - Browse thousands of products</p>
+        </div>
+        <div class="feature">
+          <p><strong>📦 Track Orders</strong> - Real-time order tracking</p>
+        </div>
+        <div class="feature">
+          <p><strong>💳 Secure Payments</strong> - Multiple payment options</p>
+        </div>
+        <div class="feature">
+          <p><strong>🎁 Special Offers</strong> - Exclusive deals for members</p>
+        </div>
+      </div>
+
+      <div class="cta">
+        <a href="{{appUrl}}" class="button">Start Shopping</a>
+      </div>
+
+      <p>If you have any questions, feel free to reach out to our support team.</p>
+    </div>
+
+    <div class="footer">
+      <p>&copy; 2024 OrderApp+. All rights reserved.</p>
+      <p>If you have questions, contact us at support@orderapp.com</p>
+    </div>
+  </div>
+</body>
+</html>

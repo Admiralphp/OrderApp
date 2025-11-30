@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: orderapp
+  labels:
+    app: payment-service
+    tier: backend
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: payment-service
+  template:
+    metadata:
+      labels:
+        app: payment-service
+        tier: backend
+    spec:
+      containers:
+      - name: payment-service
+        image: orderapp/payment-service:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3004
+          name: http
+        envFrom:
+        - configMapRef:
+            name: payment-service-config
+        - secretRef:
+            name: jwt-secret
+        - secretRef:
+            name: payment-db-secret
+        - secretRef:
+            name: payment-providers-secret
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 3004
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 3004
+          initialDelaySeconds: 15
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: orderapp
+  labels:
+    app: payment-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3004
+    targetPort: 3004
+    protocol: TCP
+    name: http
+  selector:
+    app: payment-service
