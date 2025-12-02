@@ -26,7 +26,7 @@
     "cors": "^2.8.5",
     "compression": "^1.7.4",
     "prom-client": "^15.1.0",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.6.1"
   },
   "devDependencies": {
     "nodemon": "^3.0.2",
