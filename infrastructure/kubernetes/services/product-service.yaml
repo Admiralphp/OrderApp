@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: product-service
+  namespace: orderapp
+  labels:
+    app: product-service
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: product-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: product-service
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3002"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: orderapp-sa
+      initContainers:
+      - name: wait-for-postgresql
+        image: postgres:15-alpine
+        command: ['sh', '-c', 'until pg_isready -h postgresql-product -p 5432; do echo waiting for postgresql; sleep 2; done;']
+      containers:
+      - name: product-service
+        image: ghcr.io/orderapp/product-service:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3002
+          name: http
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: product-service-config
+        - secretRef:
+            name: product-service-secret
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 3002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 3002
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health/live
+            port: 3002
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 30
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - product-service
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: product-service
+  namespace: orderapp
+  labels:
+    app: product-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3002
+    targetPort: 3002
+    protocol: TCP
+    name: http
+  selector:
+    app: product-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: product-service-pdb
+  namespace: orderapp
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: product-service

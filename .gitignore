@@ -43,3 +43,10 @@ infrastructure/kubernetes/*-secrets.yaml
 # Temporary files
 tmp/
 temp/
+
+# Vagrant
+.vagrant/
+*.box
+
+# Claude Code
+.claude/

@@ -1,0 +1,144 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: orderapp
+  labels:
+    app: orderapp
+    environment: production
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: orderapp-quota
+  namespace: orderapp
+spec:
+  hard:
+    requests.cpu: "10"
+    requests.memory: 20Gi
+    limits.cpu: "20"
+    limits.memory: 40Gi
+    persistentvolumeclaims: "20"
+    pods: "100"
+    services: "20"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: orderapp-limits
+  namespace: orderapp
+spec:
+  limits:
+  - default:
+      cpu: 500m
+      memory: 512Mi
+    defaultRequest:
+      cpu: 250m
+      memory: 256Mi
+    max:
+      cpu: "2"
+      memory: 4Gi
+    min:
+      cpu: 50m
+      memory: 64Mi
+    type: Container
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orderapp-sa
+  namespace: orderapp
+  labels:
+    app: orderapp
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: orderapp-role
+  namespace: orderapp
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: orderapp-rolebinding
+  namespace: orderapp
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: orderapp-role
+subjects:
+- kind: ServiceAccount
+  name: orderapp-sa
+  namespace: orderapp
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-ingress
+  namespace: orderapp
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-same-namespace
+  namespace: orderapp
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          app: orderapp
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-controller
+  namespace: orderapp
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-monitoring
+  namespace: orderapp
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    ports:
+    - protocol: TCP
+      port: 3001
+    - protocol: TCP
+      port: 3002
+    - protocol: TCP
+      port: 3003
+    - protocol: TCP
+      port: 3004
+    - protocol: TCP
+      port: 3005

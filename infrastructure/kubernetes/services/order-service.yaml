@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: order-service
+  namespace: orderapp
+  labels:
+    app: order-service
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: order-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: order-service
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3003"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: orderapp-sa
+      initContainers:
+      - name: wait-for-postgresql
+        image: postgres:15-alpine
+        command: ['sh', '-c', 'until pg_isready -h postgresql-order -p 5432; do echo waiting for postgresql; sleep 2; done;']
+      containers:
+      - name: order-service
+        image: ghcr.io/orderapp/order-service:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3003
+          name: http
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: order-service-config
+        - secretRef:
+            name: order-service-secret
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 3003
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 3003
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health/live
+            port: 3003
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 30
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - order-service
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: order-service
+  namespace: orderapp
+  labels:
+    app: order-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3003
+    targetPort: 3003
+    protocol: TCP
+    name: http
+  selector:
+    app: order-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: order-service-pdb
+  namespace: orderapp
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: order-service

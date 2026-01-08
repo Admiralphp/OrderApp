@@ -1,0 +1,272 @@
+# -*- mode: ruby -*-
+# vi: set ft=ruby :
+
+# OrderApp+ Kubernetes Cluster Configuration
+# 3 VMs: 1 Master + 2 Workers
+# Ubuntu 22.04 LTS, Kubernetes 1.29, Flannel CNI, MetalLB, Nginx Ingress
+
+# Cluster Configuration
+MASTER_IP = "192.168.56.10"
+WORKER1_IP = "192.168.56.11"
+WORKER2_IP = "192.168.56.12"
+POD_NETWORK_CIDR = "10.244.0.0/16"
+METALLB_IP_RANGE = "192.168.56.200-192.168.56.250"
+K8S_VERSION = "1.29"
+
+# VM Resources
+MASTER_MEMORY = 4096
+MASTER_CPUS = 2
+WORKER_MEMORY = 4096
+WORKER_CPUS = 2
+
+Vagrant.configure("2") do |config|
+  # Base box configuration
+  config.vm.box = "ubuntu/jammy64"
+  config.vm.box_check_update = false
+
+  # Disable default synced folder
+  config.vm.synced_folder ".", "/vagrant", disabled: true
+
+  # Common provisioning script for all nodes
+  $common_script = <<-SCRIPT
+    set -e
+    echo "=== Starting common provisioning ==="
+
+    # Disable swap
+    swapoff -a
+    sed -i '/swap/d' /etc/fstab
+
+    # Load required kernel modules
+    cat <<EOF | tee /etc/modules-load.d/k8s.conf
+overlay
+br_netfilter
+EOF
+    modprobe overlay
+    modprobe br_netfilter
+
+    # Set sysctl params required by Kubernetes
+    cat <<EOF | tee /etc/sysctl.d/k8s.conf
+net.bridge.bridge-nf-call-iptables  = 1
+net.bridge.bridge-nf-call-ip6tables = 1
+net.ipv4.ip_forward                 = 1
+EOF
+    sysctl --system
+
+    # Install required packages
+    apt-get update
+    apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release software-properties-common
+
+    # Install containerd
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+    echo "deb [arch=amd64 signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list
+    apt-get update
+    apt-get install -y containerd.io
+
+    # Configure containerd
+    mkdir -p /etc/containerd
+    containerd config default | tee /etc/containerd/config.toml
+    sed -i 's/SystemdCgroup = false/SystemdCgroup = true/g' /etc/containerd/config.toml
+    systemctl restart containerd
+    systemctl enable containerd
+
+    # Add Kubernetes apt repository
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v#{K8S_VERSION}/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v#{K8S_VERSION}/deb/ /" | tee /etc/apt/sources.list.d/kubernetes.list
+
+    # Install Kubernetes components
+    apt-get update
+    apt-get install -y kubelet kubeadm kubectl
+    apt-mark hold kubelet kubeadm kubectl
+
+    # Enable kubelet
+    systemctl enable kubelet
+
+    # Install additional tools
+    apt-get install -y bash-completion jq net-tools htop
+
+    # Setup kubectl bash completion
+    echo 'source <(kubectl completion bash)' >> /etc/bash.bashrc
+    echo 'alias k=kubectl' >> /etc/bash.bashrc
+    echo 'complete -F __start_kubectl k' >> /etc/bash.bashrc
+
+    echo "=== Common provisioning completed ==="
+  SCRIPT
+
+  # Master node provisioning script
+  $master_script = <<-SCRIPT
+    set -e
+    echo "=== Starting master node provisioning ==="
+
+    # Initialize Kubernetes cluster
+    kubeadm init \
+      --apiserver-advertise-address=#{MASTER_IP} \
+      --pod-network-cidr=#{POD_NETWORK_CIDR} \
+      --node-name=k8s-master
+
+    # Setup kubeconfig for root user
+    mkdir -p /root/.kube
+    cp -i /etc/kubernetes/admin.conf /root/.kube/config
+    chown root:root /root/.kube/config
+
+    # Setup kubeconfig for vagrant user
+    mkdir -p /home/vagrant/.kube
+    cp -i /etc/kubernetes/admin.conf /home/vagrant/.kube/config
+    chown vagrant:vagrant /home/vagrant/.kube/config
+
+    # Install Flannel CNI
+    kubectl apply -f https://github.com/flannel-io/flannel/releases/latest/download/kube-flannel.yml
+
+    # Wait for Flannel pods to be ready
+    echo "Waiting for Flannel to be ready..."
+    sleep 30
+    kubectl wait --for=condition=ready pod -l app=flannel -n kube-flannel --timeout=120s || true
+
+    # Install Helm
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+    # Install MetalLB
+    echo "Installing MetalLB..."
+    kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.3/config/manifests/metallb-native.yaml
+
+    # Wait for MetalLB to be ready
+    sleep 30
+    kubectl wait --for=condition=ready pod -l app=metallb -n metallb-system --timeout=180s || true
+
+    # Configure MetalLB IP pool
+    cat <<EOF | kubectl apply -f -
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: default-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - #{METALLB_IP_RANGE}
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: default
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - default-pool
+EOF
+
+    # Install Nginx Ingress Controller
+    echo "Installing Nginx Ingress Controller..."
+    helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+    helm repo update
+    helm install ingress-nginx ingress-nginx/ingress-nginx \
+      --namespace ingress-nginx \
+      --create-namespace \
+      --set controller.service.type=LoadBalancer \
+      --set controller.metrics.enabled=true \
+      --set controller.podAnnotations."prometheus\\.io/scrape"=true \
+      --set controller.podAnnotations."prometheus\\.io/port"=10254
+
+    # Wait for Nginx Ingress to be ready
+    echo "Waiting for Nginx Ingress Controller..."
+    kubectl wait --for=condition=ready pod -l app.kubernetes.io/name=ingress-nginx -n ingress-nginx --timeout=180s || true
+
+    # Install metrics-server for HPA
+    echo "Installing Metrics Server..."
+    kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+
+    # Patch metrics-server for local development (insecure TLS)
+    kubectl patch deployment metrics-server -n kube-system --type='json' -p='[
+      {"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-insecure-tls"},
+      {"op": "add", "path": "/spec/template/spec/containers/0/args/-", "value": "--kubelet-preferred-address-types=InternalIP"}
+    ]'
+
+    # Generate join command for workers
+    kubeadm token create --print-join-command > /vagrant_shared/join-command.sh
+    chmod +x /vagrant_shared/join-command.sh
+
+    # Create namespaces for OrderApp+
+    kubectl create namespace orderapp --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create namespace monitoring --dry-run=client -o yaml | kubectl apply -f -
+    kubectl create namespace sonarqube --dry-run=client -o yaml | kubectl apply -f -
+
+    # Label namespaces
+    kubectl label namespace orderapp app=orderapp --overwrite
+    kubectl label namespace monitoring app=monitoring --overwrite
+    kubectl label namespace sonarqube app=sonarqube --overwrite
+
+    echo "=== Master node provisioning completed ==="
+    echo "=== Cluster Info ==="
+    kubectl cluster-info
+    kubectl get nodes
+  SCRIPT
+
+  # Worker node provisioning script
+  $worker_script = <<-SCRIPT
+    set -e
+    echo "=== Starting worker node provisioning ==="
+
+    # Wait for join command to be available
+    echo "Waiting for join command..."
+    while [ ! -f /vagrant_shared/join-command.sh ]; do
+      sleep 5
+    done
+
+    # Join the cluster
+    bash /vagrant_shared/join-command.sh
+
+    echo "=== Worker node provisioning completed ==="
+  SCRIPT
+
+  # Shared folder for cluster join command
+  config.vm.synced_folder "./shared", "/vagrant_shared", create: true
+
+  # Master Node
+  config.vm.define "k8s-master" do |master|
+    master.vm.hostname = "k8s-master"
+    master.vm.network "private_network", ip: MASTER_IP
+
+    master.vm.provider "virtualbox" do |vb|
+      vb.name = "orderapp-k8s-master"
+      vb.memory = MASTER_MEMORY
+      vb.cpus = MASTER_CPUS
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      vb.customize ["modifyvm", :id, "--ioapic", "on"]
+    end
+
+    master.vm.provision "shell", inline: $common_script
+    master.vm.provision "shell", inline: $master_script
+  end
+
+  # Worker Node 1
+  config.vm.define "k8s-worker1" do |worker1|
+    worker1.vm.hostname = "k8s-worker1"
+    worker1.vm.network "private_network", ip: WORKER1_IP
+
+    worker1.vm.provider "virtualbox" do |vb|
+      vb.name = "orderapp-k8s-worker1"
+      vb.memory = WORKER_MEMORY
+      vb.cpus = WORKER_CPUS
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      vb.customize ["modifyvm", :id, "--ioapic", "on"]
+    end
+
+    worker1.vm.provision "shell", inline: $common_script
+    worker1.vm.provision "shell", inline: $worker_script
+  end
+
+  # Worker Node 2
+  config.vm.define "k8s-worker2" do |worker2|
+    worker2.vm.hostname = "k8s-worker2"
+    worker2.vm.network "private_network", ip: WORKER2_IP
+
+    worker2.vm.provider "virtualbox" do |vb|
+      vb.name = "orderapp-k8s-worker2"
+      vb.memory = WORKER_MEMORY
+      vb.cpus = WORKER_CPUS
+      vb.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+      vb.customize ["modifyvm", :id, "--ioapic", "on"]
+    end
+
+    worker2.vm.provision "shell", inline: $common_script
+    worker2.vm.provision "shell", inline: $worker_script
+  end
+end

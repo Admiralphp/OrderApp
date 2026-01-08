@@ -1,0 +1,177 @@
+##############################################
+# Main API Ingress
+##############################################
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orderapp-ingress
+  namespace: orderapp
+  labels:
+    app: orderapp
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+    nginx.ingress.kubernetes.io/proxy-connect-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "60"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "60"
+    # Rate limiting
+    nginx.ingress.kubernetes.io/limit-rps: "50"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+    # CORS
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "*"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-headers: "DNT,User-Agent,X-Requested-With,If-Modified-Since,Cache-Control,Content-Type,Range,Authorization"
+    # Security headers
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      add_header X-Frame-Options "SAMEORIGIN" always;
+      add_header X-Content-Type-Options "nosniff" always;
+      add_header X-XSS-Protection "1; mode=block" always;
+      add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: api.orderapp.local
+    http:
+      paths:
+      # User Service routes
+      - path: /api/v1/(auth|users)(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: user-service
+            port:
+              number: 3001
+      # Product Service routes
+      - path: /api/v1/(products|categories)(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: product-service
+            port:
+              number: 3002
+      # Order Service routes
+      - path: /api/v1/(orders|cart)(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: order-service
+            port:
+              number: 3003
+      # Payment Service routes
+      - path: /api/v1/(payments|webhooks)(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: payment-service
+            port:
+              number: 3004
+      # Notification Service routes
+      - path: /api/v1/(notifications)(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: notification-service
+            port:
+              number: 3005
+---
+##############################################
+# Health Check Ingress (no auth)
+##############################################
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: orderapp-health-ingress
+  namespace: orderapp
+  labels:
+    app: orderapp
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/rewrite-target: /health/$2
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: api.orderapp.local
+    http:
+      paths:
+      - path: /health/user(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: user-service
+            port:
+              number: 3001
+      - path: /health/product(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: product-service
+            port:
+              number: 3002
+      - path: /health/order(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: order-service
+            port:
+              number: 3003
+      - path: /health/payment(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: payment-service
+            port:
+              number: 3004
+      - path: /health/notification(/|$)(.*)
+        pathType: ImplementationSpecific
+        backend:
+          service:
+            name: notification-service
+            port:
+              number: 3005
+---
+##############################################
+# Monitoring Ingress (with basic auth)
+##############################################
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: monitoring-ingress
+  namespace: monitoring
+  labels:
+    app: monitoring
+  annotations:
+    kubernetes.io/ingress.class: nginx
+    nginx.ingress.kubernetes.io/auth-type: basic
+    nginx.ingress.kubernetes.io/auth-secret: monitoring-basic-auth
+    nginx.ingress.kubernetes.io/auth-realm: "Monitoring - Authentication Required"
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: monitoring.orderapp.local
+    http:
+      paths:
+      - path: /grafana
+        pathType: Prefix
+        backend:
+          service:
+            name: grafana
+            port:
+              number: 3000
+      - path: /prometheus
+        pathType: Prefix
+        backend:
+          service:
+            name: prometheus
+            port:
+              number: 9090
+      - path: /kibana
+        pathType: Prefix
+        backend:
+          service:
+            name: kibana
+            port:
+              number: 5601

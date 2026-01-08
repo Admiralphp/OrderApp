@@ -1,0 +1,2 @@
+# This directory is used for sharing files between Vagrant VMs
+# The join-command.sh will be generated here during cluster setup

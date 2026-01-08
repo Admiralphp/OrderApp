@@ -1,0 +1,167 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: logstash-config
+  namespace: monitoring
+  labels:
+    app: logstash
+data:
+  logstash.yml: |
+    http.host: "0.0.0.0"
+    path.config: /usr/share/logstash/pipeline
+    xpack.monitoring.enabled: true
+    xpack.monitoring.elasticsearch.hosts: ["http://elasticsearch:9200"]
+
+  logstash.conf: |
+    input {
+      beats {
+        port => 5044
+      }
+      tcp {
+        port => 5000
+        codec => json
+      }
+      http {
+        port => 8080
+        codec => json
+      }
+    }
+
+    filter {
+      if [kubernetes] {
+        mutate {
+          add_field => {
+            "namespace" => "%{[kubernetes][namespace]}"
+            "pod_name" => "%{[kubernetes][pod][name]}"
+            "container_name" => "%{[kubernetes][container][name]}"
+          }
+        }
+      }
+
+      if [message] =~ /^\{.*\}$/ {
+        json {
+          source => "message"
+          target => "parsed_json"
+        }
+      }
+
+      if [level] {
+        mutate {
+          add_field => { "log_level" => "%{level}" }
+        }
+      }
+
+      date {
+        match => ["timestamp", "ISO8601", "yyyy-MM-dd HH:mm:ss"]
+        target => "@timestamp"
+      }
+
+      # Parse service-specific logs
+      if [kubernetes][labels][app] =~ /service/ {
+        grok {
+          match => { "message" => "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:level} %{GREEDYDATA:log_message}" }
+          overwrite => ["message"]
+        }
+      }
+    }
+
+    output {
+      elasticsearch {
+        hosts => ["http://elasticsearch:9200"]
+        index => "logstash-%{+YYYY.MM.dd}"
+      }
+
+      # Debug output (disable in production)
+      # stdout { codec => rubydebug }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: logstash
+  namespace: monitoring
+  labels:
+    app: logstash
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: logstash
+  template:
+    metadata:
+      labels:
+        app: logstash
+    spec:
+      containers:
+        - name: logstash
+          image: docker.elastic.co/logstash/logstash:8.11.0
+          ports:
+            - containerPort: 5044
+              name: beats
+            - containerPort: 5000
+              name: tcp
+            - containerPort: 8080
+              name: http
+            - containerPort: 9600
+              name: api
+          env:
+            - name: LS_JAVA_OPTS
+              value: "-Xms512m -Xmx512m"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: logstash-config
+              mountPath: /usr/share/logstash/config/logstash.yml
+              subPath: logstash.yml
+            - name: logstash-pipeline
+              mountPath: /usr/share/logstash/pipeline/logstash.conf
+              subPath: logstash.conf
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 9600
+            initialDelaySeconds: 60
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 9600
+            initialDelaySeconds: 30
+            periodSeconds: 5
+      volumes:
+        - name: logstash-config
+          configMap:
+            name: logstash-config
+        - name: logstash-pipeline
+          configMap:
+            name: logstash-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: logstash
+  namespace: monitoring
+  labels:
+    app: logstash
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5044
+      targetPort: 5044
+      protocol: TCP
+      name: beats
+    - port: 5000
+      targetPort: 5000
+      protocol: TCP
+      name: tcp
+    - port: 8080
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: logstash

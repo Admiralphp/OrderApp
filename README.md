@@ -36,6 +36,7 @@ Each microservice:
 ```
 OrderApp-Plus/
 ├── docs/                           # Documentation
+│   ├── Rapport_Final_DevOps.md     # Rapport final complet du projet
 │   ├── architecture-overview.md    # System architecture
 │   ├── microservices-specs.md      # Microservices specifications
 │   ├── api-design.md               # API documentation
@@ -58,10 +59,13 @@ OrderApp-Plus/
 │       └── hpa/
 ├── ci-cd/                          # CI/CD pipelines
 │   └── github-actions/
-└── monitoring/                     # Observability
-    ├── prometheus/
-    ├── grafana/
-    └── elk/
+├── monitoring/                     # Observability
+│   ├── prometheus/
+│   ├── grafana/
+│   └── elk/
+├── SETUP_GUIDE.md                  # Guide d'installation
+├── DEPLOYMENT_GUIDE.md             # Guide de déploiement K8s
+└── README.md                       # Ce fichier
 ```
 
 ## 🚀 Quick Start
@@ -192,12 +196,41 @@ npm run test:coverage
 
 ## 📖 Documentation
 
-Detailed documentation available in the `/docs` folder:
+### Rapport Final du Projet
+- [**Rapport Final DevOps**](./docs/Rapport_Final_DevOps.md) - Documentation complète du projet (conception, développement, déploiement)
 
-- [Architecture Overview](./docs/architecture-overview.md)
-- [Microservices Specifications](./docs/microservices-specs.md)
-- [API Design](./docs/api-design.md)
-- [Agile Backlog](./docs/agile-backlog.md)
+### Documentation Technique
+| Document | Description |
+|----------|-------------|
+| [Architecture Overview](./docs/architecture-overview.md) | Vue d'ensemble de l'architecture système |
+| [Microservices Specifications](./docs/microservices-specs.md) | Spécifications détaillées des microservices |
+| [API Design](./docs/api-design.md) | Documentation des APIs REST |
+| [Agile Backlog](./docs/agile-backlog.md) | Product backlog et sprints |
+
+### Guides de Déploiement
+| Guide | Description |
+|-------|-------------|
+| [Setup Guide](./SETUP_GUIDE.md) | Guide d'installation de l'environnement |
+| [Deployment Guide](./DEPLOYMENT_GUIDE.md) | Guide de déploiement Kubernetes |
+
+### Documentation par Composant
+| Composant | Documentation |
+|-----------|---------------|
+| [User Service](./services/user-service/README.md) | Service d'authentification |
+| [Product Service](./services/product-service/README.md) | Service catalogue produits |
+| [Order Service](./services/order-service/README.md) | Service commandes |
+| [Payment Service](./services/payment-service/README.md) | Service paiements |
+| [Notification Service](./services/notification-service/README.md) | Service notifications |
+| [Docker Infrastructure](./infrastructure/docker/README.md) | Configuration Docker Compose |
+| [Kubernetes Infrastructure](./infrastructure/kubernetes/README.md) | Manifestes Kubernetes |
+| [Monitoring Stack](./monitoring/README.md) | Prometheus, Grafana, ELK |
+| [CI/CD Workflows](./.github/workflows/README.md) | GitHub Actions pipelines |
+
+### Documentation GitHub
+| Document | Description |
+|----------|-------------|
+| [Branch Protection](./.github/BRANCH_PROTECTION.md) | Règles de protection des branches |
+| [Pull Request Template](./.github/pull_request_template.md) | Template pour les PRs |
 
 ## 🤝 Contributing
 

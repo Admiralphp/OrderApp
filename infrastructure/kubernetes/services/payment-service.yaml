@@ -1,0 +1,127 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: orderapp
+  labels:
+    app: payment-service
+    version: v1
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: payment-service
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: payment-service
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3004"
+        prometheus.io/path: "/metrics"
+    spec:
+      serviceAccountName: orderapp-sa
+      initContainers:
+      - name: wait-for-mongodb
+        image: mongo:6.0
+        command: ['sh', '-c', 'until mongosh --host mongodb-payment --eval "db.adminCommand(\"ping\")"; do echo waiting for mongodb; sleep 2; done;']
+      containers:
+      - name: payment-service
+        image: ghcr.io/orderapp/payment-service:latest
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 3004
+          name: http
+          protocol: TCP
+        envFrom:
+        - configMapRef:
+            name: payment-service-config
+        - secretRef:
+            name: payment-service-secret
+        resources:
+          requests:
+            cpu: 250m
+            memory: 256Mi
+          limits:
+            cpu: 500m
+            memory: 512Mi
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 3004
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 3004
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+        startupProbe:
+          httpGet:
+            path: /health/live
+            port: 3004
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          failureThreshold: 30
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          readOnlyRootFilesystem: true
+          allowPrivilegeEscalation: false
+        volumeMounts:
+        - name: tmp
+          mountPath: /tmp
+      volumes:
+      - name: tmp
+        emptyDir: {}
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - payment-service
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: orderapp
+  labels:
+    app: payment-service
+spec:
+  type: ClusterIP
+  ports:
+  - port: 3004
+    targetPort: 3004
+    protocol: TCP
+    name: http
+  selector:
+    app: payment-service
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: payment-service-pdb
+  namespace: orderapp
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: payment-service

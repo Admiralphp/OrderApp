@@ -1,0 +1,269 @@
+##############################################
+# PostgreSQL for Product Service
+##############################################
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgresql-product-pvc
+  namespace: orderapp
+  labels:
+    app: postgresql-product
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgresql-product-secret
+  namespace: orderapp
+  labels:
+    app: postgresql-product
+type: Opaque
+stringData:
+  POSTGRES_DB: productdb
+  POSTGRES_USER: product_user
+  POSTGRES_PASSWORD: postgresql_product_password_2024
+  DATABASE_URL: postgresql://product_user:postgresql_product_password_2024@postgresql-product:5432/productdb
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgresql-product-config
+  namespace: orderapp
+  labels:
+    app: postgresql-product
+data:
+  postgresql.conf: |
+    listen_addresses = '*'
+    max_connections = 100
+    shared_buffers = 128MB
+    effective_cache_size = 384MB
+    maintenance_work_mem = 64MB
+    checkpoint_completion_target = 0.9
+    wal_buffers = 4MB
+    default_statistics_target = 100
+    random_page_cost = 1.1
+    effective_io_concurrency = 200
+    min_wal_size = 1GB
+    max_wal_size = 4GB
+    max_worker_processes = 2
+    max_parallel_workers_per_gather = 1
+    max_parallel_workers = 2
+    max_parallel_maintenance_workers = 1
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql-product
+  namespace: orderapp
+  labels:
+    app: postgresql-product
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql-product
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: postgresql-product
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+    spec:
+      containers:
+      - name: postgresql
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+          name: postgresql
+        env:
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        envFrom:
+        - secretRef:
+            name: postgresql-product-secret
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+        volumeMounts:
+        - name: postgresql-data
+          mountPath: /var/lib/postgresql/data
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - product_user
+            - -d
+            - productdb
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - product_user
+            - -d
+            - productdb
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      volumes:
+      - name: postgresql-data
+        persistentVolumeClaim:
+          claimName: postgresql-product-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-product
+  namespace: orderapp
+  labels:
+    app: postgresql-product
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgresql
+  selector:
+    app: postgresql-product
+---
+##############################################
+# PostgreSQL for Order Service
+##############################################
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgresql-order-pvc
+  namespace: orderapp
+  labels:
+    app: postgresql-order
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgresql-order-secret
+  namespace: orderapp
+  labels:
+    app: postgresql-order
+type: Opaque
+stringData:
+  POSTGRES_DB: orderdb
+  POSTGRES_USER: order_user
+  POSTGRES_PASSWORD: postgresql_order_password_2024
+  DATABASE_URL: postgresql://order_user:postgresql_order_password_2024@postgresql-order:5432/orderdb
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgresql-order
+  namespace: orderapp
+  labels:
+    app: postgresql-order
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgresql-order
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: postgresql-order
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9187"
+    spec:
+      containers:
+      - name: postgresql
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+          name: postgresql
+        env:
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        envFrom:
+        - secretRef:
+            name: postgresql-order-secret
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+        volumeMounts:
+        - name: postgresql-data
+          mountPath: /var/lib/postgresql/data
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - order_user
+            - -d
+            - orderdb
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - order_user
+            - -d
+            - orderdb
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      volumes:
+      - name: postgresql-data
+        persistentVolumeClaim:
+          claimName: postgresql-order-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-order
+  namespace: orderapp
+  labels:
+    app: postgresql-order
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgresql
+  selector:
+    app: postgresql-order

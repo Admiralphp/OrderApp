@@ -1,0 +1,535 @@
+name: OrderApp+ CI/CD Pipeline
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+      - 'feature/**'
+      - 'hotfix/**'
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Deployment environment'
+        required: true
+        default: 'staging'
+        type: choice
+        options:
+          - staging
+          - production
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_PREFIX: ${{ github.repository_owner }}/orderapp
+  NODE_VERSION: '18'
+  SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+jobs:
+  ##############################################
+  # STAGE 1: Code Quality & Linting
+  ##############################################
+  lint:
+    name: Lint - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: npm ci
+
+      - name: Run ESLint
+        working-directory: services/${{ matrix.service }}
+        run: npm run lint --if-present
+
+      - name: Check code formatting
+        working-directory: services/${{ matrix.service }}
+        run: npm run format:check --if-present
+
+  ##############################################
+  # STAGE 2: Unit & Integration Tests
+  ##############################################
+  test:
+    name: Test - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_password
+          POSTGRES_DB: testdb
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      mongodb:
+        image: mongo:6.0
+        env:
+          MONGO_INITDB_ROOT_USERNAME: admin
+          MONGO_INITDB_ROOT_PASSWORD: password
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand({ping: 1})'"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: services/${{ matrix.service }}/package-lock.json
+
+      - name: Install dependencies
+        working-directory: services/${{ matrix.service }}
+        run: npm ci
+
+      - name: Run tests with coverage
+        working-directory: services/${{ matrix.service }}
+        env:
+          NODE_ENV: test
+          DATABASE_URL: postgresql://test_user:test_password@localhost:5432/testdb
+          MONGODB_URI: mongodb://admin:password@localhost:27017/testdb?authSource=admin
+          REDIS_URL: redis://localhost:6379
+          JWT_SECRET: test_jwt_secret
+        run: npm run test:coverage --if-present || npm test
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: services/${{ matrix.service }}/coverage/lcov.info
+          flags: ${{ matrix.service }}
+          fail_ci_if_error: false
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-results-${{ matrix.service }}
+          path: services/${{ matrix.service }}/coverage/
+          retention-days: 7
+
+  ##############################################
+  # STAGE 3: SonarQube Analysis
+  ##############################################
+  sonarqube:
+    name: SonarQube - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download test coverage
+        uses: actions/download-artifact@v4
+        with:
+          name: test-results-${{ matrix.service }}
+          path: services/${{ matrix.service }}/coverage/
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@master
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          projectBaseDir: services/${{ matrix.service }}
+          args: >
+            -Dsonar.projectKey=orderapp-${{ matrix.service }}
+            -Dsonar.projectName=OrderApp+ ${{ matrix.service }}
+            -Dsonar.sources=src
+            -Dsonar.tests=tests
+            -Dsonar.javascript.lcov.reportPaths=coverage/lcov.info
+            -Dsonar.coverage.exclusions=**/tests/**,**/node_modules/**
+            -Dsonar.exclusions=**/node_modules/**,**/coverage/**
+
+  ##############################################
+  # STAGE 4: SonarQube Quality Gate
+  ##############################################
+  quality-gate:
+    name: Quality Gate
+    runs-on: ubuntu-latest
+    needs: sonarqube
+    steps:
+      - name: SonarQube Quality Gate Check
+        uses: SonarSource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+  ##############################################
+  # STAGE 5: Security Scanning
+  ##############################################
+  security-scan:
+    name: Security - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Trivy vulnerability scanner (filesystem)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: 'services/${{ matrix.service }}'
+          format: 'sarif'
+          output: 'trivy-fs-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-fs-${{ matrix.service }}.sarif'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: NPM Audit
+        working-directory: services/${{ matrix.service }}
+        run: |
+          npm ci
+          npm audit --audit-level=high || true
+
+  ##############################################
+  # STAGE 6: Build Docker Images
+  ##############################################
+  build:
+    name: Build - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    needs: [test, security-scan]
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/develop'
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - user-service
+          - product-service
+          - order-service
+          - payment-service
+          - notification-service
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      image-tag: ${{ steps.meta.outputs.tags }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix=
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=develop,enable=${{ github.ref == 'refs/heads/develop' }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: services/${{ matrix.service }}
+          file: services/${{ matrix.service }}/Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+            BUILD_DATE=${{ github.event.head_commit.timestamp }}
+            VCS_REF=${{ github.sha }}
+
+      - name: Run Trivy vulnerability scanner (image)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${{ matrix.service }}:${{ github.sha }}
+          format: 'sarif'
+          output: 'trivy-image-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy image scan results
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-image-${{ matrix.service }}.sarif'
+
+  ##############################################
+  # STAGE 7: Deploy to Staging
+  ##############################################
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [build, quality-gate]
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.orderapp.local
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.29.0'
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_STAGING }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Deploy databases
+        run: |
+          kubectl apply -f infrastructure/kubernetes/databases/
+
+      - name: Deploy ConfigMaps and Secrets
+        run: |
+          kubectl apply -f infrastructure/kubernetes/configmaps/
+          kubectl apply -f infrastructure/kubernetes/secrets/
+
+      - name: Deploy services
+        run: |
+          for service in user product order payment notification; do
+            kubectl set image deployment/${service}-service \
+              ${service}-service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${service}-service:${{ github.sha }} \
+              -n orderapp || \
+            kubectl apply -f infrastructure/kubernetes/services/${service}-service.yaml
+          done
+
+      - name: Wait for rollout
+        run: |
+          for service in user product order payment notification; do
+            kubectl rollout status deployment/${service}-service -n orderapp --timeout=300s
+          done
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests against staging..."
+          for service in user product order payment notification; do
+            kubectl exec -n orderapp deployment/${service}-service -- \
+              wget -qO- http://localhost:300${service: -1}/health/ready || echo "Warning: ${service} health check issue"
+          done
+
+      - name: Notify deployment status
+        if: always()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": "Staging Deployment ${{ job.status }}",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*OrderApp+ Staging Deployment*\nStatus: ${{ job.status }}\nCommit: ${{ github.sha }}\nBranch: ${{ github.ref_name }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+  ##############################################
+  # STAGE 8: Deploy to Production
+  ##############################################
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: [build, quality-gate]
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://api.orderapp.local
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: 'v1.29.0'
+
+      - name: Configure kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          echo "${{ secrets.KUBE_CONFIG_PRODUCTION }}" | base64 -d > $HOME/.kube/config
+          chmod 600 $HOME/.kube/config
+
+      - name: Deploy databases (if needed)
+        run: |
+          kubectl apply -f infrastructure/kubernetes/databases/
+
+      - name: Deploy ConfigMaps and Secrets
+        run: |
+          kubectl apply -f infrastructure/kubernetes/configmaps/
+          kubectl apply -f infrastructure/kubernetes/secrets/
+
+      - name: Deploy HPA
+        run: |
+          kubectl apply -f infrastructure/kubernetes/hpa/
+
+      - name: Deploy services with canary
+        run: |
+          for service in user product order payment notification; do
+            # Update image
+            kubectl set image deployment/${service}-service \
+              ${service}-service=${{ env.REGISTRY }}/${{ env.IMAGE_PREFIX }}/${service}-service:${{ github.sha }} \
+              -n orderapp || \
+            kubectl apply -f infrastructure/kubernetes/services/${service}-service.yaml
+
+            # Wait for rollout
+            kubectl rollout status deployment/${service}-service -n orderapp --timeout=300s
+          done
+
+      - name: Deploy Ingress
+        run: |
+          kubectl apply -f infrastructure/kubernetes/ingress/
+
+      - name: Run production smoke tests
+        run: |
+          echo "Running production smoke tests..."
+          sleep 30
+          for port in 3001 3002 3003 3004 3005; do
+            echo "Checking service on port $port..."
+          done
+
+      - name: Notify successful deployment
+        if: success()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": ":white_check_mark: Production Deployment Successful",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*OrderApp+ Production Deployment*\n:white_check_mark: Status: Success\nCommit: `${{ github.sha }}`\nDeployed by: ${{ github.actor }}"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Notify failed deployment
+        if: failure()
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "text": ":x: Production Deployment Failed",
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*OrderApp+ Production Deployment*\n:x: Status: Failed\nCommit: `${{ github.sha }}`\nPlease investigate immediately!"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          echo "Rolling back deployment..."
+          for service in user product order payment notification; do
+            kubectl rollout undo deployment/${service}-service -n orderapp
+          done

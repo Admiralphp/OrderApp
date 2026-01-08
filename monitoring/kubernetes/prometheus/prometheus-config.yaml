@@ -1,0 +1,210 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: monitoring
+  labels:
+    app: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: orderapp-local
+        env: production
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets:
+              - alertmanager:9093
+
+    rule_files:
+      - /etc/prometheus/rules/*.yml
+
+    scrape_configs:
+      # Prometheus self-monitoring
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      # Kubernetes API server
+      - job_name: 'kubernetes-apiservers'
+        kubernetes_sd_configs:
+          - role: endpoints
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_namespace, __meta_kubernetes_service_name, __meta_kubernetes_endpoint_port_name]
+            action: keep
+            regex: default;kubernetes;https
+
+      # Kubernetes nodes
+      - job_name: 'kubernetes-nodes'
+        kubernetes_sd_configs:
+          - role: node
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+
+      # Kubernetes pods with prometheus annotations
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+
+      # OrderApp microservices
+      - job_name: 'orderapp-services'
+        kubernetes_sd_configs:
+          - role: service
+            namespaces:
+              names:
+                - orderapp
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_service_name]
+            target_label: service
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+
+      # User Service
+      - job_name: 'user-service'
+        static_configs:
+          - targets: ['user-service.orderapp.svc.cluster.local:3001']
+        metrics_path: /metrics
+
+      # Product Service
+      - job_name: 'product-service'
+        static_configs:
+          - targets: ['product-service.orderapp.svc.cluster.local:3002']
+        metrics_path: /metrics
+
+      # Order Service
+      - job_name: 'order-service'
+        static_configs:
+          - targets: ['order-service.orderapp.svc.cluster.local:3003']
+        metrics_path: /metrics
+
+      # Payment Service
+      - job_name: 'payment-service'
+        static_configs:
+          - targets: ['payment-service.orderapp.svc.cluster.local:3004']
+        metrics_path: /metrics
+
+      # Notification Service
+      - job_name: 'notification-service'
+        static_configs:
+          - targets: ['notification-service.orderapp.svc.cluster.local:3005']
+        metrics_path: /metrics
+
+      # MongoDB Exporter
+      - job_name: 'mongodb'
+        static_configs:
+          - targets: ['mongodb-exporter:9216']
+
+      # PostgreSQL Exporter
+      - job_name: 'postgresql'
+        static_configs:
+          - targets: ['postgresql-exporter:9187']
+
+      # Redis Exporter
+      - job_name: 'redis'
+        static_configs:
+          - targets: ['redis-exporter:9121']
+
+      # Node Exporter
+      - job_name: 'node-exporter'
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - source_labels: [__address__]
+            regex: '(.*):10250'
+            replacement: '${1}:9100'
+            target_label: __address__
+
+  alerts.yml: |
+    groups:
+      - name: orderapp-alerts
+        rules:
+          - alert: ServiceDown
+            expr: up == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Service {{ $labels.job }} is down"
+              description: "{{ $labels.job }} has been down for more than 1 minute."
+
+          - alert: HighCPUUsage
+            expr: rate(process_cpu_seconds_total[5m]) * 100 > 80
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High CPU usage on {{ $labels.job }}"
+              description: "CPU usage is above 80% for more than 5 minutes."
+
+          - alert: HighMemoryUsage
+            expr: (process_resident_memory_bytes / 1024 / 1024) > 400
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "High memory usage on {{ $labels.job }}"
+              description: "Memory usage is above 400MB for more than 5 minutes."
+
+          - alert: HighErrorRate
+            expr: rate(http_requests_total{status=~"5.."}[5m]) / rate(http_requests_total[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "High error rate on {{ $labels.job }}"
+              description: "Error rate is above 5% for more than 5 minutes."
+
+          - alert: SlowResponseTime
+            expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 2
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Slow response time on {{ $labels.job }}"
+              description: "95th percentile response time is above 2 seconds."
+
+          - alert: PodRestartingTooMuch
+            expr: increase(kube_pod_container_status_restarts_total[1h]) > 5
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod {{ $labels.pod }} is restarting frequently"
+              description: "Pod has restarted more than 5 times in the last hour."

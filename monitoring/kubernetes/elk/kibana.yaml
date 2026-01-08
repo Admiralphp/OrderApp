@@ -1,0 +1,91 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kibana-config
+  namespace: monitoring
+  labels:
+    app: kibana
+data:
+  kibana.yml: |
+    server.name: kibana
+    server.host: "0.0.0.0"
+    server.port: 5601
+    server.basePath: "/kibana"
+    server.rewriteBasePath: true
+    elasticsearch.hosts: ["http://elasticsearch:9200"]
+    monitoring.ui.container.elasticsearch.enabled: true
+    xpack.reporting.enabled: false
+    xpack.security.enabled: false
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kibana
+  namespace: monitoring
+  labels:
+    app: kibana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kibana
+  template:
+    metadata:
+      labels:
+        app: kibana
+    spec:
+      containers:
+        - name: kibana
+          image: docker.elastic.co/kibana/kibana:8.11.0
+          ports:
+            - containerPort: 5601
+              name: http
+          env:
+            - name: ELASTICSEARCH_HOSTS
+              value: "http://elasticsearch:9200"
+          resources:
+            requests:
+              cpu: 250m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+          volumeMounts:
+            - name: kibana-config
+              mountPath: /usr/share/kibana/config/kibana.yml
+              subPath: kibana.yml
+          livenessProbe:
+            httpGet:
+              path: /kibana/api/status
+              port: 5601
+            initialDelaySeconds: 120
+            periodSeconds: 10
+            timeoutSeconds: 5
+          readinessProbe:
+            httpGet:
+              path: /kibana/api/status
+              port: 5601
+            initialDelaySeconds: 30
+            periodSeconds: 5
+            timeoutSeconds: 3
+      volumes:
+        - name: kibana-config
+          configMap:
+            name: kibana-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kibana
+  namespace: monitoring
+  labels:
+    app: kibana
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5601
+      targetPort: 5601
+      protocol: TCP
+      name: http
+  selector:
+    app: kibana

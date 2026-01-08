@@ -1,0 +1,98 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: sonarqube-postgresql-pvc
+  namespace: sonarqube
+  labels:
+    app: sonarqube-postgresql
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: standard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sonarqube-postgresql
+  namespace: sonarqube
+  labels:
+    app: sonarqube-postgresql
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sonarqube-postgresql
+  strategy:
+    type: Recreate
+  template:
+    metadata:
+      labels:
+        app: sonarqube-postgresql
+    spec:
+      containers:
+      - name: postgresql
+        image: postgres:15-alpine
+        ports:
+        - containerPort: 5432
+          name: postgresql
+        envFrom:
+        - secretRef:
+            name: sonarqube-postgresql-secret
+        resources:
+          requests:
+            cpu: 250m
+            memory: 512Mi
+          limits:
+            cpu: "1"
+            memory: 1Gi
+        volumeMounts:
+        - name: postgresql-data
+          mountPath: /var/lib/postgresql/data
+        livenessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - sonarqube
+            - -d
+            - sonarqube
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          exec:
+            command:
+            - pg_isready
+            - -U
+            - sonarqube
+            - -d
+            - sonarqube
+          initialDelaySeconds: 5
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+      volumes:
+      - name: postgresql-data
+        persistentVolumeClaim:
+          claimName: sonarqube-postgresql-pvc
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sonarqube-postgresql
+  namespace: sonarqube
+  labels:
+    app: sonarqube-postgresql
+spec:
+  type: ClusterIP
+  ports:
+  - port: 5432
+    targetPort: 5432
+    protocol: TCP
+    name: postgresql
+  selector:
+    app: sonarqube-postgresql
